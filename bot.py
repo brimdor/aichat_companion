@@ -71,10 +71,13 @@ async def handle_set_channel(ctx):
     # Check if the user has the "BroBot_Admin" role
     if 'BroBot_Admin' in [role.name for role in ctx.author.roles]:
         try:
-            # Store the target channel ID in the list
-            target_channels.append(ctx.channel.id)
-            save_allowed_channels()  # Save the updated allowed channels to the file
-            await ctx.send(f"Bot target channel set to {ctx.channel.mention}")
+            if ctx.channel.id not in target_channels:
+                # Store the target channel ID in the list
+                target_channels.append(ctx.channel.id)
+                save_allowed_channels()  # Save the updated allowed channels to the file
+                await ctx.send(f"Bot target channel set to {ctx.channel.mention}")
+            else:
+                await ctx.send("Channel is already in the Allowed Channels List.")
         except discord.errors.NotFound:
             await ctx.send("Invalid channel ID. Please provide a valid channel ID.")
     else:
@@ -121,9 +124,6 @@ async def handle_list_channels(ctx):
         await ctx.send("You do not have permission to use this command.")
 
 
-
-
-
 # Function to handle AI responses when @BroBot is mentioned
 @client.event
 async def on_message(message):
@@ -143,19 +143,19 @@ async def on_button_click(interaction, button):
         if channel_id in target_channels:
             target_channels.remove(channel_id)
             save_allowed_channels()  # Save the updated allowed channels to the file
-            allowed_channels_list = list_allowed_channels()
-            if allowed_channels_list:
-                embed = discord.Embed(title="Allowed Channels")
-                for channel_info in allowed_channels_list:
-                    channel_id, channel_mention = channel_info.split(' - ')
-                    channel_id = int(channel_id)
-                    button = Button(style=ButtonStyle.red, label="🗑️", custom_id=f"remove_channel_{channel_id}")
-                    embed.add_field(name=channel_mention, value="Click the button to delete this channel", inline=False)
-                await interaction.message.edit(embed=embed, components=[button])  # Send each button separately
-            else:
-                await interaction.message.edit(content="No channels are currently allowed.", components=[])
+            # allowed_channels_list = list_allowed_channels()
+            # if allowed_channels_list:
+            #     embed = discord.Embed(title="Allowed Channels")
+            #     for channel_info in allowed_channels_list:
+            #         channel_id, channel_mention = channel_info.split(' - ')
+            #         channel_id = int(channel_id)
+            #         button = Button(style=ButtonStyle.red, label="🗑️", custom_id=f"remove_channel_{channel_id}")
+            #         embed.add_field(name=channel_mention, value="Click the button to delete this channel", inline=False)
+            #     await interaction.message.edit(embed=embed, components=[button])  # Send each button separately
+            # else:
+            #     await interaction.message.edit(content="No channels are currently allowed.", components=[])
         else:
-            print("Channel ID not found in target_channels!")  # Debugging print
+            print("Error Adding Channel ID to Allowed Channels List.")  # Debugging print
 
 # Function to handle AI responses when @BroBot is mentioned
 async def handle_bot_mention(message):

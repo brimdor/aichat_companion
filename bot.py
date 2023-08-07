@@ -12,6 +12,7 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 AI_TYPE = os.getenv('AI_TYPE')
 AI_ROLE1 = os.getenv('AI_ROLE1')
 AI_ROLE2 = os.getenv('AI_ROLE2')
+AI_NAME = os.getenv('AI_NAME')
 botname = os.getenv('botname')
 
 # Set up Discord bot
@@ -48,7 +49,7 @@ def generate_response(user_message):
         model="gpt-3.5-turbo-16k-0613",
         messages=[
             {"role": "system", "content": f"You are a helpful {AI_TYPE}."},
-            {"role": "system", "content": f"Your name is {botname}."},
+            {"role": "system", "content": f"Your name is {AI_NAME}."},
             {"role": "system", "content": f"{AI_ROLE1}"},
             {"role": "system", "content": f"{AI_ROLE2}"},
             {"role": "user", "content": f"{user_message}"}

@@ -13,7 +13,7 @@ AI_TYPE = os.getenv('AI_TYPE')
 AI_ROLE1 = os.getenv('AI_ROLE1')
 AI_ROLE2 = os.getenv('AI_ROLE2')
 AI_NAME = os.getenv('AI_NAME')
-botname = os.getenv('botname')
+BOT_ROLE = os.getenv('BOT_ROLE')
 
 # Set up Discord bot
 intents = discord.Intents.default()
@@ -68,8 +68,8 @@ async def on_ready():
 
 @client.command(name='set_channel')
 async def handle_set_channel(ctx):
-    # Check if the user has the "BroBot_Admin" role
-    if 'BroBot_Admin' in [role.name for role in ctx.author.roles]:
+    # Check if the user has the "Bot_Admin" role
+    if 'Bot_Admin' in [role.name for role in ctx.author.roles]:
         try:
             if ctx.channel.id not in target_channels:
                 # Store the target channel ID in the list
@@ -110,8 +110,8 @@ def list_allowed_channels():
 # Function to list the current allowed channels with delete buttons
 @client.command(name='list_channels')
 async def handle_list_channels(ctx):
-    # Check if the user has the "BroBot_Admin" role
-    if 'BroBot_Admin' in [role.name for role in ctx.author.roles]:
+    # Check if the user has the "Bot_Admin" role
+    if 'Bot_Admin' in [role.name for role in ctx.author.roles]:
         allowed_channels_list = list_allowed_channels()
         if allowed_channels_list:
             await ctx.send("Allowed Channels")
@@ -124,11 +124,11 @@ async def handle_list_channels(ctx):
         await ctx.send("You do not have permission to use this command.")
 
 
-# Function to handle AI responses when @BroBot is mentioned
+# Function to handle AI responses when bot's role is mentioned
 @client.event
 async def on_message(message):
-    # Check if the message mentions the "@BroBot" role
-    if any(role.name == botname for role in message.role_mentions):
+    # Check if the message mentions the bot's role
+    if any(role.name == BOT_ROLE for role in message.role_mentions):
         await handle_bot_mention(message)
     else:
         await client.process_commands(message)
@@ -141,28 +141,31 @@ async def on_button_click(interaction, button):
         channel_id = int(custom_id[len("remove_channel_"):])
 
         if channel_id in target_channels:
+            print("Targeting Targeted Channel for Removal")
             target_channels.remove(channel_id)
-            save_allowed_channels()  # Save the updated allowed channels to the file
-            # allowed_channels_list = list_allowed_channels()
-            # if allowed_channels_list:
-            #     embed = discord.Embed(title="Allowed Channels")
-            #     for channel_info in allowed_channels_list:
-            #         channel_id, channel_mention = channel_info.split(' - ')
-            #         channel_id = int(channel_id)
-            #         button = Button(style=ButtonStyle.red, label="🗑️", custom_id=f"remove_channel_{channel_id}")
-            #         embed.add_field(name=channel_mention, value="Click the button to delete this channel", inline=False)
-            #     await interaction.message.edit(embed=embed, components=[button])  # Send each button separately
-            # else:
-            #     await interaction.message.edit(content="No channels are currently allowed.", components=[])
+            print("Successfully Removed Targeted Channel")
+            try:
+                save_allowed_channels()  # Save the updated allowed channels to the file
+                print("Updated the Allowed Channels List")
+                await interaction.respond(content="Channel removed successfully!")  # Send a response to acknowledge the removal
+            except Exception as e:
+                print("Error saving allowed channels:", e)
+                await interaction.respond(content="Error saving allowed channels.")  # Send a response for the error case
         else:
-            print("Error Adding Channel ID to Allowed Channels List.")  # Debugging print
+            print("Error removing channel from Channel List.")  # Debugging print
+            await interaction.respond(content="Error removing channel.")  # Send a response for the error case
+    else:
+        print("Try Again?!")
+        await interaction.respond(content="Invalid action. Please try again.")  # Send a response for other actions
 
-# Function to handle AI responses when @BroBot is mentioned
+# Function to handle AI responses when bot's role is mentioned
 async def handle_bot_mention(message):
     if message.channel.id in target_channels:
+        print(message)
         # Generate and send AI response using the user's message as the prompt
         response = generate_response(message.content)
-        await message.channel.send(response)
+        author_name = message.author.name.capitalize()
+        await message.channel.send(f"<To {author_name}> {response}")
 
 # Load the allowed channel IDs when the bot starts up
 target_channels = load_allowed_channels()

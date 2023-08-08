@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 import openai
 
 # Load environment variables
-load_dotenv()
+load_dotenv(override=True)
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 AI_TYPE = os.getenv('AI_TYPE')
@@ -17,18 +17,20 @@ BOT_ROLE = os.getenv('BOT_ROLE')
 
 # Set up Discord bot
 intents = discord.Intents.default()
-intents.typing = False
-intents.presences = False
+intents.typing = True
+intents.presences = True
+intents.message_content = True
 client = commands.Bot(command_prefix=commands.when_mentioned_or('/'), intents=intents)
 
 # OpenAI GPT-3.5 setup
 openai.api_key = OPENAI_API_KEY
 
 # File to store the allowed channel IDs
-allowed_channels_file = "allowed_channels.txt"
+allowed_channels_file = "config/allowed_channels.txt"
 
 # Create a set to store processed custom IDs
 processed_custom_ids = set()
+
 
 # Function to load the allowed channel IDs from the file
 def load_allowed_channels():
@@ -84,13 +86,13 @@ async def handle_set_channel(ctx):
         await ctx.send("You do not have permission to use this command.")
 
 # Function to generate delete buttons for allowed channels
-def generate_delete_buttons(channel_list):
-    buttons = []
-    for channel_info in channel_list:
-        channel_id = channel_info.split(' - ')[0]
-        button = Button(style=ButtonStyle.red, label="🗑️", custom_id=f"remove_channel_{channel_id}")
-        buttons.append(button)
-    return buttons
+# def generate_delete_buttons(channel_list):
+#     buttons = []
+#     for channel_info in channel_list:
+#         channel_id = channel_info.split(' - ')[0]
+#         button = Button(style=ButtonStyle.red, label="🗑️", custom_id=f"remove_channel_{channel_id}")
+#         buttons.append(button)
+#     return buttons
 
 # Function to list the current allowed channels with delete buttons
 def list_allowed_channels():
@@ -101,8 +103,8 @@ def list_allowed_channels():
     for channel_id in target_channels:
         channel = client.get_channel(channel_id)
         if channel:
-            channel_info = f"{channel_id} - {channel.mention}"
-            button = Button(style=ButtonStyle.red, label="🗑️", custom_id=f"remove_channel_{channel_id}")
+            channel_info = f"{channel.mention}"
+            button = Button(style=ButtonStyle.danger, label="🗑️", custom_id=f"remove_channel_{channel_id}")
             channel_list.append((channel_info, button))
 
     return channel_list

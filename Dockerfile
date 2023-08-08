@@ -1,16 +1,18 @@
-FROM brimdor/brobot:latest
+FROM ubuntu
 
-RUN mkdir /app
+RUN mkdir -p /app/config
 RUN chmod -R 755 /app
 WORKDIR /app
-RUN mkdir templates
 
-RUN python3 -m pip install openai python-dotenv discord
+ADD bot.py .
+ADD requirements.txt .
 
-ADD * .
+RUN apt update -y && apt install python3-pip -y
+# RUN python3 -m pip install openai python-dotenv discord
+RUN pip install -r requirements.txt
 
 USER root
 
 RUN chmod -R 750 *                      
 
-ENTRYPOINT ["bash","./entrypoint.sh"]
+ENTRYPOINT ["python3","bot.py"]

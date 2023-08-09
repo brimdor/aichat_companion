@@ -1,5 +1,6 @@
 import discord
-from discord import Button, ButtonStyle
+from discord import ButtonStyle
+from discord.ui import Button, View
 from discord.ext import commands
 import os
 from dotenv import load_dotenv
@@ -20,7 +21,8 @@ intents = discord.Intents.default()
 intents.typing = True
 intents.presences = True
 intents.message_content = True
-client = commands.Bot(command_prefix=commands.when_mentioned_or('/'), intents=intents)
+client = commands.Bot(command_prefix=commands.when_mentioned_or('/'), intents=intents, sync_commands=True)
+
 
 # OpenAI GPT-3.5 setup
 openai.api_key = OPENAI_API_KEY
@@ -85,15 +87,6 @@ async def handle_set_channel(ctx):
     else:
         await ctx.send("You do not have permission to use this command.")
 
-# Function to generate delete buttons for allowed channels
-# def generate_delete_buttons(channel_list):
-#     buttons = []
-#     for channel_info in channel_list:
-#         channel_id = channel_info.split(' - ')[0]
-#         button = Button(style=ButtonStyle.red, label="🗑️", custom_id=f"remove_channel_{channel_id}")
-#         buttons.append(button)
-#     return buttons
-
 # Function to list the current allowed channels with delete buttons
 def list_allowed_channels():
     if not target_channels:
@@ -117,9 +110,14 @@ async def handle_list_channels(ctx):
         allowed_channels_list = list_allowed_channels()
         if allowed_channels_list:
             await ctx.send("Allowed Channels")
+            # for channel_info, button in allowed_channels_list:
             for channel_info, button in allowed_channels_list:
                 embed = discord.Embed(description=channel_info)
-                await ctx.send(embed=embed, components=[button])
+                # view = discord.ui.View()
+                view = View()
+                view.add_item(button)
+                await ctx.send(embed=embed, view=view)
+
         else:
             await ctx.send("No channels are currently allowed.")
     else:
@@ -139,6 +137,7 @@ async def on_message(message):
 @client.event
 async def on_button_click(interaction, button):
     custom_id = button.custom_id
+    await interaction.respond(content=f"Initiating: {custom_id}")
     if custom_id.startswith("remove_channel_"):
         channel_id = int(custom_id[len("remove_channel_"):])
 
@@ -147,18 +146,16 @@ async def on_button_click(interaction, button):
             target_channels.remove(channel_id)
             print("Successfully Removed Targeted Channel")
             try:
-                save_allowed_channels()  # Save the updated allowed channels to the file
+                save_allowed_channels()
                 print("Updated the Allowed Channels List")
-                await interaction.respond(content="Channel removed successfully!")  # Send a response to acknowledge the removal
+                await interaction.respond(content="Channel removed successfully!")
             except Exception as e:
                 print("Error saving allowed channels:", e)
-                await interaction.respond(content="Error saving allowed channels.")  # Send a response for the error case
+                await interaction.respond(content="Error saving allowed channels.")
         else:
-            print("Error removing channel from Channel List.")  # Debugging print
-            await interaction.respond(content="Error removing channel.")  # Send a response for the error case
-    else:
-        print("Try Again?!")
-        await interaction.respond(content="Invalid action. Please try again.")  # Send a response for other actions
+            print("Error removing channel from Channel List.")
+            await interaction.respond(content="Error removing channel.")
+
 
 # Function to handle AI responses when bot's role is mentioned
 async def handle_bot_mention(message):

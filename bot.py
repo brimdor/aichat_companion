@@ -127,10 +127,14 @@ async def handle_list_channels(ctx):
 # Function to handle AI responses when bot's role is mentioned
 @client.event
 async def on_message(message):
-    # Check if the message mentions the bot's role
-    if any(role.name == BOT_ROLE for role in message.role_mentions):
+    if message.author == client.user:  # Check if the message is from the bot itself
+        return
+    
+    # Check if the bot is mentioned by name
+    if client.user in message.mentions:
         await handle_bot_mention(message)
     else:
+        # If not mentioned by name, you can choose to handle other logic here
         await client.process_commands(message)
 
 # Event handler for button click

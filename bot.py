@@ -71,7 +71,7 @@ async def on_ready():
     print(f'Logged in as {client.user.name}')
     print('Bot is ready.')
 
-@client.command(name='set_channel')
+@client.command(name='set_channel', description='Sets the current channel to allow the Bot to interact.')
 async def handle_set_channel(ctx):
     if AI_NAME.lower() in ctx.message.content.lower():
         # Check if the user has the "Bot_Admin" role
@@ -106,7 +106,7 @@ def list_allowed_channels():
     return channel_list
 
 # Function to list the current allowed channels with delete buttons
-@client.command(name='list_channels')
+@client.command(name='list_channels', description='Displays a list of Bot interactive channels and gives the ability to delete them.')
 async def handle_list_channels(ctx):
     if AI_NAME.lower() in ctx.message.content.lower():
         # Check if the user has the "Bot_Admin" role

@@ -14,14 +14,15 @@ AI_TYPE = os.getenv('AI_TYPE')
 AI_ROLE1 = os.getenv('AI_ROLE1')
 AI_ROLE2 = os.getenv('AI_ROLE2')
 AI_NAME = os.getenv('AI_NAME')
-BOT_ROLE = os.getenv('BOT_ROLE')
+# BOT_ROLE = os.getenv('BOT_ROLE')
 
 # Set up Discord bot
 intents = discord.Intents.default()
 intents.typing = True
 intents.presences = True
 intents.message_content = True
-client = commands.Bot(command_prefix=commands.when_mentioned_or('/'), intents=intents, sync_commands=True)
+# intents.message_components = True
+client = commands.Bot(command_prefix=commands.when_mentioned_or('/'), intents=intents)
 
 
 # OpenAI GPT-3.5 setup
@@ -72,20 +73,23 @@ async def on_ready():
 
 @client.command(name='set_channel')
 async def handle_set_channel(ctx):
-    # Check if the user has the "Bot_Admin" role
-    if 'Bot_Admin' in [role.name for role in ctx.author.roles]:
-        try:
-            if ctx.channel.id not in target_channels:
-                # Store the target channel ID in the list
-                target_channels.append(ctx.channel.id)
-                save_allowed_channels()  # Save the updated allowed channels to the file
-                await ctx.send(f"Bot target channel set to {ctx.channel.mention}")
-            else:
-                await ctx.send("Channel is already in the Allowed Channels List.")
-        except discord.errors.NotFound:
-            await ctx.send("Invalid channel ID. Please provide a valid channel ID.")
+    if AI_NAME.lower() in ctx.message.content.lower():
+        # Check if the user has the "Bot_Admin" role
+        if 'Bot_Admin' in [role.name for role in ctx.author.roles]:
+            try:
+                if ctx.channel.id not in target_channels:
+                    # Store the target channel ID in the list
+                    target_channels.append(ctx.channel.id)
+                    save_allowed_channels()  # Save the updated allowed channels to the file
+                    await ctx.send(f"Bot target channel set to {ctx.channel.mention}")
+                else:
+                    await ctx.send("Channel is already in the Allowed Channels List.")
+            except discord.errors.NotFound:
+                await ctx.send("Invalid channel ID. Please provide a valid channel ID.")
+        else:
+            await ctx.send("You do not have permission to use this command.")
     else:
-        await ctx.send("You do not have permission to use this command.")
+        await ctx.send("Please include the AI Name after the slash command.")
 
 # Function to list the current allowed channels with delete buttons
 def list_allowed_channels():
@@ -95,33 +99,58 @@ def list_allowed_channels():
     channel_list = []
     for channel_id in target_channels:
         channel = client.get_channel(channel_id)
-        if channel:
-            channel_info = f"{channel.mention}"
-            button = Button(style=ButtonStyle.danger, label="🗑️", custom_id=f"remove_channel_{channel_id}")
-            channel_list.append((channel_info, button))
+        channel_info = f"{channel.mention}"
+        button = Button(style=ButtonStyle.danger, label="🗑️", custom_id=f"remove_channel_{channel_id}")
+        channel_list.append((channel_info, button))
 
     return channel_list
 
 # Function to list the current allowed channels with delete buttons
 @client.command(name='list_channels')
 async def handle_list_channels(ctx):
-    # Check if the user has the "Bot_Admin" role
-    if 'Bot_Admin' in [role.name for role in ctx.author.roles]:
-        allowed_channels_list = list_allowed_channels()
-        if allowed_channels_list:
-            await ctx.send("Allowed Channels")
-            # for channel_info, button in allowed_channels_list:
-            for channel_info, button in allowed_channels_list:
-                embed = discord.Embed(description=channel_info)
-                # view = discord.ui.View()
-                view = View()
-                view.add_item(button)
-                await ctx.send(embed=embed, view=view)
+    if AI_NAME.lower() in ctx.message.content.lower():
+        # Check if the user has the "Bot_Admin" role
+        if 'Bot_Admin' in [role.name for role in ctx.author.roles]:
+            allowed_channels_list = list_allowed_channels()
+            if allowed_channels_list:
+                await ctx.send("Allowed Channels")
+                # for channel_info, button in allowed_channels_list:
+                for channel_info, button in allowed_channels_list:
+                    embed = discord.Embed(description=channel_info)
+                    # view = discord.ui.View()
+                    view = View()
+                    view.add_item(button)
+                    await ctx.send(embed=embed, view=view)
 
+            else:
+                await ctx.send("No channels are currently allowed.")
         else:
-            await ctx.send("No channels are currently allowed.")
+            await ctx.send("You do not have permission to use this command.")
     else:
-        await ctx.send("You do not have permission to use this command.")
+        await ctx.send("Please include the AI Name after the slash command.")
+
+# Event handler for button click
+@client.event
+async def on_interaction(interaction):
+    if isinstance(interaction, discord.Interaction) and interaction.type == discord.InteractionType.component:
+        custom_id = interaction.data["custom_id"]
+        if custom_id.startswith("remove_channel_"):
+            channel_id = int(custom_id[len("remove_channel_"):])
+
+            if channel_id in target_channels:
+                print("Targeting Targeted Channel for Removal")
+                target_channels.remove(channel_id)
+                print("Successfully Removed Targeted Channel")
+                try:
+                    save_allowed_channels()
+                    print("Updated the Allowed Channels List")
+                    await interaction.response.send_message(content="Channel removed successfully!")
+                except Exception as e:
+                    print("Error saving allowed channels:", e)
+                    await interaction.response.send_message(content="Error saving allowed channels.")
+            else:
+                print("Error removing channel from Channel List.")
+                await interaction.response.send_message(content="Error removing channel.")
 
 
 # Function to handle AI responses when bot's role is mentioned
@@ -136,30 +165,6 @@ async def on_message(message):
     else:
         # If not mentioned by name, you can choose to handle other logic here
         await client.process_commands(message)
-
-# Event handler for button click
-@client.event
-async def on_button_click(interaction, button):
-    custom_id = button.custom_id
-    await interaction.respond(content=f"Initiating: {custom_id}")
-    if custom_id.startswith("remove_channel_"):
-        channel_id = int(custom_id[len("remove_channel_"):])
-
-        if channel_id in target_channels:
-            print("Targeting Targeted Channel for Removal")
-            target_channels.remove(channel_id)
-            print("Successfully Removed Targeted Channel")
-            try:
-                save_allowed_channels()
-                print("Updated the Allowed Channels List")
-                await interaction.respond(content="Channel removed successfully!")
-            except Exception as e:
-                print("Error saving allowed channels:", e)
-                await interaction.respond(content="Error saving allowed channels.")
-        else:
-            print("Error removing channel from Channel List.")
-            await interaction.respond(content="Error removing channel.")
-
 
 # Function to handle AI responses when bot's role is mentioned
 async def handle_bot_mention(message):

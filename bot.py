@@ -153,27 +153,28 @@ async def on_interaction(interaction):
                 await interaction.response.send_message(content="Error removing channel.")
 
 
-# Function to handle AI responses when bot's role is mentioned
+# Function to handle AI responses when bot is mentioned or Direct Messaged
 @client.event
 async def on_message(message):
     if message.author == client.user:  # Check if the message is from the bot itself
         return
-    
-    # Check if the bot is mentioned by name
-    if client.user in message.mentions:
+
+    # Check if the bot is mentioned by name or if the message is a Direct Message
+    if client.user in message.mentions or isinstance(message.channel, discord.DMChannel):
         await handle_bot_mention(message)
     else:
-        # If not mentioned by name, you can choose to handle other logic here
+        # If not mentioned by name and not a DM, you can choose to handle other logic here
         await client.process_commands(message)
 
 # Function to handle AI responses when bot's role is mentioned
 async def handle_bot_mention(message):
-    if message.channel.id in target_channels:
+    if isinstance(message.channel, discord.DMChannel) or message.channel.id in target_channels:
         print(message)
         # Generate and send AI response using the user's message as the prompt
         response = generate_response(message.content)
         author_name = message.author.name.capitalize()
         await message.channel.send(f"<To {author_name}> {response}")
+
 
 # Load the allowed channel IDs when the bot starts up
 target_channels = load_allowed_channels()

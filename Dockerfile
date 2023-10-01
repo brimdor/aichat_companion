@@ -1,4 +1,4 @@
-FROM ubuntu
+FROM ubuntu:lunar-20230731
 
 RUN mkdir -p /app/config
 RUN chmod -R 755 /app

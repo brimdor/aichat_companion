@@ -183,4 +183,58 @@ async def forget(interaction: discord.Interaction):
     except Exception:
         await interaction.followup.send("No valid response received. Forget cancelled.", ephemeral=True)
 
+TOKEN_LIMIT = 2000  # Set your token limit here or load from env
+MAX_DISCORD_MESSAGE_LENGTH = 2000  # Discord message character limit
+
+@client.tree.command(name="search", description="Perform a web search and get an answer relevant to the bot's current roles, with sources.")
+@app_commands.describe(query="What do you want to search for?")
+async def search(interaction: discord.Interaction, query: str):
+    if not interaction.user.guild_permissions.administrator and not any(
+        role.name == 'Bot_Admin' for role in getattr(interaction.user, 'roles', [])
+    ):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+    await interaction.response.defer(thinking=True, ephemeral=True)
+    try:
+        from openai import OpenAI
+        import re
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        system_prompt = (
+            "You are a helpful {0}. Your name is {1}. {2} {3} "
+            "Always perform a web search for the latest information, regardless of the question phrasing. "
+            "Do not rely solely on your core knowledge. "
+            "Always consolidate your answer to fit within {4} tokens and {5} Discord message characters. "
+            "If the answer is not relevant to your current roles, respond with: 'No relevant results found for my current roles.' "
+            "When providing answers from web search, always include sources (short links or URLs) for any factual claims or summaries. "
+        ).format(AI_TYPE, AI_NAME, AI_ROLE1, AI_ROLE2, TOKEN_LIMIT, MAX_DISCORD_MESSAGE_LENGTH)
+        # Force the model to always use web search for the query
+        search_input = (
+            "[ALWAYS USE WEB SEARCH TOOL] Please search the web for the latest information to answer the following question, regardless of your core knowledge: {}\n\nSystem: {}"
+        ).format(query, system_prompt)
+        response = openai_client.responses.create(
+            model="gpt-4.1",
+            tools=[{"type": "web_search_preview"}],
+            input=search_input
+        )
+        answer = getattr(response, 'output_text', str(response))
+        if not answer:
+            answer = "No relevant results found for my current roles."
+        # Extract sources (URLs or domains in parentheses)
+        sources = set()
+        for match in re.findall(r'\((https?://[^)]+|[\w.-]+\.[a-z]{2,})\)', answer):
+            sources.add(match.strip())
+        content = re.sub(r'\((https?://[^)]+|[\w.-]+\.[a-z]{2,})\)', '', answer)
+        if sources:
+            sources_list = '\n'.join(sorted(sources))
+            content = content.strip()
+            if len(content) + len(sources_list) + 8 > MAX_DISCORD_MESSAGE_LENGTH:
+                content = content[:MAX_DISCORD_MESSAGE_LENGTH - len(sources_list) - 8] + '...'
+            answer = "{}\n---\nSources:\n{}".format(content, sources_list)
+        else:
+            if len(answer) > MAX_DISCORD_MESSAGE_LENGTH:
+                answer = answer[:MAX_DISCORD_MESSAGE_LENGTH - 3] + "..."
+        await interaction.followup.send(answer, ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send("Error during web search: {}".format(e), ephemeral=True)
+
 client.run(DISCORD_TOKEN)

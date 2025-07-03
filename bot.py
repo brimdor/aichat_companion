@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 import openai
 import sqlite3
 
-# Load environment variables conditionally
 if not os.getenv('DISCORD_TOKEN') and os.path.exists('.env'):
     load_dotenv(override=True)
 
@@ -17,32 +16,33 @@ AI_ROLE1 = os.getenv('AI_ROLE1')
 AI_ROLE2 = os.getenv('AI_ROLE2')
 AI_NAME = os.getenv('AI_NAME')
 MEMORY_LIMIT = int(os.getenv('MEMORY_LIMIT', 10))
+AI_MODEL = os.getenv('AI_MODEL')
+AI_SEARCH_MODEL = os.getenv('AI_SEARCH_MODEL') or AI_MODEL
+TOKEN_LIMIT = 3000
+MAX_DISCORD_MESSAGE_LENGTH = 1995
+BOT_ACCESS_ROLE = os.getenv('BOT_ACCESS_ROLE', 'Bot_Access')
 
-# Set up Discord bot
 intents = discord.Intents.default()
 intents.typing = True
 intents.presences = True
 intents.message_content = True
 client = commands.Bot(command_prefix=commands.when_mentioned_or('/'), intents=intents)
 
-# OpenAI GPT-3.5 setup
 openai.api_key = OPENAI_API_KEY
 
-# Ensure the config directory exists
 if not os.path.exists('config'):
     os.makedirs('config')
 
-# Initialize SQLite database
 conn = sqlite3.connect('config/allowed_channels.db')
 cursor = conn.cursor()
 cursor.execute('''CREATE TABLE IF NOT EXISTS allowed_channels (channel_id INTEGER PRIMARY KEY)''')
 conn.commit()
-
-# Initialize memory table
 cursor.execute('''CREATE TABLE IF NOT EXISTS memory (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT)''')
 conn.commit()
 
 def generate_response(user_message):
+    from openai import OpenAI
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
     memories = get_memories()
     memory_context = '\n'.join(["Memory {}: {}".format(i+1, mem[1]) for i, mem in enumerate(memories)])
     system_messages = [
@@ -54,17 +54,21 @@ def generate_response(user_message):
     if memory_context:
         system_messages.append({"role": "system", "content": "Context memories: {}".format(memory_context)})
     system_messages.append({"role": "user", "content": "{}".format(user_message)})
-    response = openai.ChatCompletion.create(
-        model="gpt-4.1",
+    response = openai_client.chat.completions.create(
+        model=AI_MODEL,
         messages=system_messages,
         max_tokens=5000,
         temperature=0.7
     )
-    return response['choices'][0]['message']['content']
+    return response.choices[0].message.content
 
 @client.event
 async def on_ready():
     print('Logged in as {}'.format(client.user.name))
+    print('---')
+    print('AI Model: {}'.format(AI_MODEL))
+    print('AI Search Model: {}'.format(AI_SEARCH_MODEL))
+    print('---')
     print('Bot is ready.')
     try:
         await client.tree.sync()
@@ -72,8 +76,6 @@ async def on_ready():
         print('Bot is ready to interact...')
     except Exception as e:
         print('Error syncing slash commands: {}'.format(e))
-
-# Load allowed channels at startup
 
 target_channels = []
 
@@ -91,8 +93,7 @@ target_channels = load_allowed_channels()
 @client.tree.command(name="set_channel", description="Sets a channel to allow the Bot to interact.")
 @app_commands.describe(channel="The channel to allow the bot to interact in.")
 async def set_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-    # Check if the user has the "Bot_Admin" role
-    if not interaction.user.guild_permissions.administrator and not any(role.name == 'Bot_Admin' for role in getattr(interaction.user, 'roles', [])):
+    if not interaction.user.guild_permissions.administrator and not any(role.name == BOT_ACCESS_ROLE for role in getattr(interaction.user, 'roles', [])):
         await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
     if channel.id not in target_channels:
@@ -104,7 +105,7 @@ async def set_channel(interaction: discord.Interaction, channel: discord.TextCha
 
 @client.tree.command(name="list_channels", description="Lists all channels where the bot is allowed to interact.")
 async def list_channels(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator and not any(role.name == 'Bot_Admin' for role in getattr(interaction.user, 'roles', [])):
+    if not interaction.user.guild_permissions.administrator and not any(role.name == BOT_ACCESS_ROLE for role in getattr(interaction.user, 'roles', [])):
         await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
     if not target_channels:
@@ -116,10 +117,16 @@ async def list_channels(interaction: discord.Interaction):
 
 @client.event
 async def on_message(message):
-    print("Received message: {} in {}".format(message.content, message.channel.id))
+    if message.guild:
+        server_name = message.guild.name
+        channel_name = message.channel.name if hasattr(message.channel, 'name') else str(message.channel)
+        location = "{}:{}".format(server_name, channel_name)
+    else:
+        user_name = message.author.name if hasattr(message.author, 'name') else str(message.author)
+        location = "DM:Direct Message with {}".format(user_name)
+    print("Received message: {} in {}".format(message.content, location))
     if message.author == client.user:
         return
-    # Ignore slash command invocations as messages
     if message.content.startswith('/'):
         return
     if client.user in message.mentions or isinstance(message.channel, discord.DMChannel):
@@ -128,8 +135,27 @@ async def on_message(message):
         await client.process_commands(message)
 
 async def handle_bot_mention(message):
+    if message.guild:
+        try:
+            member = message.guild.get_member(message.author.id)
+            if member is None:
+                member = await message.guild.fetch_member(message.author.id)
+        except Exception:
+            member = None
+        if not member:
+            await message.channel.send(f"Sorry {message.author.mention}, you do not have permission to interact with the bot.")
+            return
+        is_admin = getattr(member.guild_permissions, 'administrator', False)
+        has_access_role = any(role.name.strip().lower() == BOT_ACCESS_ROLE.strip().lower() for role in getattr(member, 'roles', []))
+        print(f"[DEBUG] User: {message.author} | Admin: {is_admin} | Roles: {[role.name for role in getattr(member, 'roles', [])]} | BOT_ACCESS_ROLE: {BOT_ACCESS_ROLE}")
+        if not (is_admin or has_access_role):
+            await message.channel.send(f"Sorry {message.author.mention}, you do not have permission to interact with the bot.")
+            return
+    else:
+        await message.channel.send(f"Sorry {message.author.mention}, you do not have permission to interact with the bot in DMs.")
+        return
     response = generate_response(message.content)
-    await message.channel.send("{} {}".format(message.author.mention, response))
+    await message.channel.send(f"{message.author.mention} {response}")
 
 def get_memories():
     cursor.execute('SELECT id, content FROM memory ORDER BY id ASC')
@@ -138,7 +164,6 @@ def get_memories():
 def add_memory(content):
     cursor.execute('INSERT INTO memory (content) VALUES (?)', (content,))
     conn.commit()
-    # Enforce memory limit
     cursor.execute('SELECT COUNT(*) FROM memory')
     count = cursor.fetchone()[0]
     if count > MEMORY_LIMIT:
@@ -152,7 +177,7 @@ def delete_memory(memory_id):
 @client.tree.command(name="remember", description="Store a short memory for the bot to use as context.")
 @app_commands.describe(text="The information to remember.")
 async def remember(interaction: discord.Interaction, text: str):
-    if not interaction.user.guild_permissions.administrator and not any(role.name == 'Bot_Admin' for role in getattr(interaction.user, 'roles', [])):
+    if not interaction.user.guild_permissions.administrator and not any(role.name == BOT_ACCESS_ROLE for role in getattr(interaction.user, 'roles', [])):
         await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
     add_memory(text)
@@ -160,7 +185,7 @@ async def remember(interaction: discord.Interaction, text: str):
 
 @client.tree.command(name="forget", description="Remove a memory from the bot's context.")
 async def forget(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator and not any(role.name == 'Bot_Admin' for role in getattr(interaction.user, 'roles', [])):
+    if not interaction.user.guild_permissions.administrator and not any(role.name == BOT_ACCESS_ROLE for role in getattr(interaction.user, 'roles', [])):
         await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
     memories = get_memories()
@@ -183,18 +208,17 @@ async def forget(interaction: discord.Interaction):
     except Exception:
         await interaction.followup.send("No valid response received. Forget cancelled.", ephemeral=True)
 
-TOKEN_LIMIT = 2000  # Set your token limit here or load from env
-MAX_DISCORD_MESSAGE_LENGTH = 2000  # Discord message character limit
-
 @client.tree.command(name="search", description="Perform a web search and get an answer relevant to the bot's current roles, with sources.")
 @app_commands.describe(query="What do you want to search for?")
 async def search(interaction: discord.Interaction, query: str):
-    if not interaction.user.guild_permissions.administrator and not any(
-        role.name == 'Bot_Admin' for role in getattr(interaction.user, 'roles', [])
-    ):
+    if not interaction.user.guild_permissions.administrator and not any(role.name == BOT_ACCESS_ROLE for role in getattr(interaction.user, 'roles', [])):
         await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
-    await interaction.response.defer(thinking=True, ephemeral=True)
+    try:
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        deferred = True
+    except Exception:
+        deferred = False
     try:
         from openai import OpenAI
         import re
@@ -207,19 +231,18 @@ async def search(interaction: discord.Interaction, query: str):
             "If the answer is not relevant to your current roles, respond with: 'No relevant results found for my current roles.' "
             "When providing answers from web search, always include sources (short links or URLs) for any factual claims or summaries. "
         ).format(AI_TYPE, AI_NAME, AI_ROLE1, AI_ROLE2, TOKEN_LIMIT, MAX_DISCORD_MESSAGE_LENGTH)
-        # Force the model to always use web search for the query
         search_input = (
             "[ALWAYS USE WEB SEARCH TOOL] Please search the web for the latest information to answer the following question, regardless of your core knowledge: {}\n\nSystem: {}"
         ).format(query, system_prompt)
+        search_model = AI_SEARCH_MODEL
         response = openai_client.responses.create(
-            model="gpt-4.1",
+            model=search_model,
             tools=[{"type": "web_search_preview"}],
             input=search_input
         )
         answer = getattr(response, 'output_text', str(response))
         if not answer:
             answer = "No relevant results found for my current roles."
-        # Extract sources (URLs or domains in parentheses)
         sources = set()
         for match in re.findall(r'\((https?://[^)]+|[\w.-]+\.[a-z]{2,})\)', answer):
             sources.add(match.strip())
@@ -227,14 +250,29 @@ async def search(interaction: discord.Interaction, query: str):
         if sources:
             sources_list = '\n'.join(sorted(sources))
             content = content.strip()
-            if len(content) + len(sources_list) + 8 > MAX_DISCORD_MESSAGE_LENGTH:
-                content = content[:MAX_DISCORD_MESSAGE_LENGTH - len(sources_list) - 8] + '...'
-            answer = "{}\n---\nSources:\n{}".format(content, sources_list)
+            max_content_len = MAX_DISCORD_MESSAGE_LENGTH - len(sources_list) - 8
+            if len(content) > max_content_len:
+                content = content[:max_content_len - 3] + '...'
+            answer = f"{content}\n---\nSources:\n{sources_list}"
         else:
             if len(answer) > MAX_DISCORD_MESSAGE_LENGTH:
                 answer = answer[:MAX_DISCORD_MESSAGE_LENGTH - 3] + "..."
-        await interaction.followup.send(answer, ephemeral=True)
+        if len(answer) > MAX_DISCORD_MESSAGE_LENGTH:
+            answer = answer[:MAX_DISCORD_MESSAGE_LENGTH - 3] + "..."
+        if deferred:
+            await interaction.followup.send(answer, ephemeral=True)
+        else:
+            await interaction.response.send_message(answer, ephemeral=True)
     except Exception as e:
-        await interaction.followup.send("Error during web search: {}".format(e), ephemeral=True)
+        error_msg = f"Error during web search: {e}"
+        if len(error_msg) > MAX_DISCORD_MESSAGE_LENGTH:
+            error_msg = error_msg[:MAX_DISCORD_MESSAGE_LENGTH - 3] + "..."
+        try:
+            if deferred:
+                await interaction.followup.send(error_msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(error_msg, ephemeral=True)
+        except Exception:
+            pass
 
 client.run(DISCORD_TOKEN)

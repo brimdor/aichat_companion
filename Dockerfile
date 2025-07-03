@@ -1,4 +1,6 @@
-FROM ubuntu:lunar-20230731
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN mkdir -p /app/config
 RUN chmod -R 755 /app

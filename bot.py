@@ -1,183 +1,186 @@
 import discord
-from discord import ButtonStyle
-from discord.ui import Button, View
 from discord.ext import commands
+from discord import app_commands
 import os
 from dotenv import load_dotenv
 import openai
+import sqlite3
 
-# Load environment variables
-load_dotenv(override=True)
+# Load environment variables conditionally
+if not os.getenv('DISCORD_TOKEN') and os.path.exists('.env'):
+    load_dotenv(override=True)
+
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 AI_TYPE = os.getenv('AI_TYPE')
 AI_ROLE1 = os.getenv('AI_ROLE1')
 AI_ROLE2 = os.getenv('AI_ROLE2')
 AI_NAME = os.getenv('AI_NAME')
-# BOT_ROLE = os.getenv('BOT_ROLE')
+MEMORY_LIMIT = int(os.getenv('MEMORY_LIMIT', 10))
 
 # Set up Discord bot
 intents = discord.Intents.default()
 intents.typing = True
 intents.presences = True
 intents.message_content = True
-# intents.message_components = True
 client = commands.Bot(command_prefix=commands.when_mentioned_or('/'), intents=intents)
-
 
 # OpenAI GPT-3.5 setup
 openai.api_key = OPENAI_API_KEY
 
-# File to store the allowed channel IDs
-allowed_channels_file = "config/allowed_channels.txt"
+# Ensure the config directory exists
+if not os.path.exists('config'):
+    os.makedirs('config')
 
-# Create a set to store processed custom IDs
-processed_custom_ids = set()
+# Initialize SQLite database
+conn = sqlite3.connect('config/allowed_channels.db')
+cursor = conn.cursor()
+cursor.execute('''CREATE TABLE IF NOT EXISTS allowed_channels (channel_id INTEGER PRIMARY KEY)''')
+conn.commit()
 
+# Initialize memory table
+cursor.execute('''CREATE TABLE IF NOT EXISTS memory (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT)''')
+conn.commit()
 
-# Function to load the allowed channel IDs from the file
-def load_allowed_channels():
-    if os.path.exists(allowed_channels_file):
-        with open(allowed_channels_file, "r") as f:
-            return [int(channel_id.strip()) for channel_id in f.readlines()]
-    else:
-        return []
-
-# Function to save the allowed channel IDs to the file
-def save_allowed_channels():
-    with open(allowed_channels_file, "w") as f:
-        f.write('\n'.join(str(channel_id) for channel_id in target_channels))
-
-# Function to generate AI response
 def generate_response(user_message):
+    memories = get_memories()
+    memory_context = '\n'.join(["Memory {}: {}".format(i+1, mem[1]) for i, mem in enumerate(memories)])
+    system_messages = [
+        {"role": "system", "content": "You are a helpful {}.".format(AI_TYPE)},
+        {"role": "system", "content": "Your name is {}.".format(AI_NAME)},
+        {"role": "system", "content": "{}".format(AI_ROLE1)},
+        {"role": "system", "content": "{}".format(AI_ROLE2)},
+    ]
+    if memory_context:
+        system_messages.append({"role": "system", "content": "Context memories: {}".format(memory_context)})
+    system_messages.append({"role": "user", "content": "{}".format(user_message)})
     response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo-16k-0613",
-        messages=[
-            {"role": "system", "content": f"You are a helpful {AI_TYPE}."},
-            {"role": "system", "content": f"Your name is {AI_NAME}."},
-            {"role": "system", "content": f"{AI_ROLE1}"},
-            {"role": "system", "content": f"{AI_ROLE2}"},
-            {"role": "user", "content": f"{user_message}"}
-        ],
-        max_tokens=500,
+        model="gpt-4.1",
+        messages=system_messages,
+        max_tokens=5000,
         temperature=0.7
     )
     return response['choices'][0]['message']['content']
 
 @client.event
 async def on_ready():
-    global processed_custom_ids
-    processed_custom_ids = set()
-    print(f'Logged in as {client.user.name}')
+    print('Logged in as {}'.format(client.user.name))
     print('Bot is ready.')
+    try:
+        await client.tree.sync()
+        print('Slash commands synced.')
+        print('Bot is ready to interact...')
+    except Exception as e:
+        print('Error syncing slash commands: {}'.format(e))
 
-@client.command(name='set_channel', description='Sets the current channel to allow the Bot to interact.')
-async def handle_set_channel(ctx):
-    if AI_NAME.lower() in ctx.message.content.lower():
-        # Check if the user has the "Bot_Admin" role
-        if 'Bot_Admin' in [role.name for role in ctx.author.roles]:
-            try:
-                if ctx.channel.id not in target_channels:
-                    # Store the target channel ID in the list
-                    target_channels.append(ctx.channel.id)
-                    save_allowed_channels()  # Save the updated allowed channels to the file
-                    await ctx.send(f"Bot target channel set to {ctx.channel.mention}")
-                else:
-                    await ctx.send("Channel is already in the Allowed Channels List.")
-            except discord.errors.NotFound:
-                await ctx.send("Invalid channel ID. Please provide a valid channel ID.")
-        else:
-            await ctx.send("You do not have permission to use this command.")
+# Load allowed channels at startup
+
+target_channels = []
+
+def load_allowed_channels():
+    cursor.execute('SELECT channel_id FROM allowed_channels')
+    return [row[0] for row in cursor.fetchall()]
+
+def save_allowed_channels():
+    cursor.execute('DELETE FROM allowed_channels')
+    cursor.executemany('INSERT INTO allowed_channels (channel_id) VALUES (?)', [(channel_id,) for channel_id in target_channels])
+    conn.commit()
+
+target_channels = load_allowed_channels()
+
+@client.tree.command(name="set_channel", description="Sets a channel to allow the Bot to interact.")
+@app_commands.describe(channel="The channel to allow the bot to interact in.")
+async def set_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    # Check if the user has the "Bot_Admin" role
+    if not interaction.user.guild_permissions.administrator and not any(role.name == 'Bot_Admin' for role in getattr(interaction.user, 'roles', [])):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+    if channel.id not in target_channels:
+        target_channels.append(channel.id)
+        save_allowed_channels()
+        await interaction.response.send_message("Bot target channel set to {}".format(channel.mention))
     else:
-        await ctx.send("Please include the AI Name after the slash command.")
+        await interaction.response.send_message("Channel is already in the Allowed Channels List.")
 
-# Function to list the current allowed channels with delete buttons
-def list_allowed_channels():
+@client.tree.command(name="list_channels", description="Lists all channels where the bot is allowed to interact.")
+async def list_channels(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator and not any(role.name == 'Bot_Admin' for role in getattr(interaction.user, 'roles', [])):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
     if not target_channels:
-        return []
+        await interaction.response.send_message("No channels are currently set for bot interaction.", ephemeral=True)
+        return
+    channel_mentions = [interaction.guild.get_channel(channel_id).mention for channel_id in target_channels if interaction.guild.get_channel(channel_id)]
+    channels_str = "\n".join(channel_mentions)
+    await interaction.response.send_message("Allowed channels for bot interaction:\n{}".format(channels_str), ephemeral=True)
 
-    channel_list = []
-    for channel_id in target_channels:
-        channel = client.get_channel(channel_id)
-        channel_info = f"{channel.mention}"
-        button = Button(style=ButtonStyle.danger, label="🗑️", custom_id=f"remove_channel_{channel_id}")
-        channel_list.append((channel_info, button))
-
-    return channel_list
-
-# Function to list the current allowed channels with delete buttons
-@client.command(name='list_channels', description='Displays a list of Bot interactive channels and gives the ability to delete them.')
-async def handle_list_channels(ctx):
-    if AI_NAME.lower() in ctx.message.content.lower():
-        # Check if the user has the "Bot_Admin" role
-        if 'Bot_Admin' in [role.name for role in ctx.author.roles]:
-            allowed_channels_list = list_allowed_channels()
-            if allowed_channels_list:
-                await ctx.send("Allowed Channels")
-                # for channel_info, button in allowed_channels_list:
-                for channel_info, button in allowed_channels_list:
-                    embed = discord.Embed(description=channel_info)
-                    # view = discord.ui.View()
-                    view = View()
-                    view.add_item(button)
-                    await ctx.send(embed=embed, view=view)
-
-            else:
-                await ctx.send("No channels are currently allowed.")
-        else:
-            await ctx.send("You do not have permission to use this command.")
-    else:
-        await ctx.send("Please include the AI Name after the slash command.")
-
-# Event handler for button click
-@client.event
-async def on_interaction(interaction):
-    if isinstance(interaction, discord.Interaction) and interaction.type == discord.InteractionType.component:
-        custom_id = interaction.data["custom_id"]
-        if custom_id.startswith("remove_channel_"):
-            channel_id = int(custom_id[len("remove_channel_"):])
-
-            if channel_id in target_channels:
-                print("Targeting Targeted Channel for Removal")
-                target_channels.remove(channel_id)
-                print("Successfully Removed Targeted Channel")
-                try:
-                    save_allowed_channels()
-                    print("Updated the Allowed Channels List")
-                    await interaction.response.send_message(content="Channel removed successfully!")
-                except Exception as e:
-                    print("Error saving allowed channels:", e)
-                    await interaction.response.send_message(content="Error saving allowed channels.")
-            else:
-                print("Error removing channel from Channel List.")
-                await interaction.response.send_message(content="Error removing channel.")
-
-
-# Function to handle AI responses when bot is mentioned or Direct Messaged
 @client.event
 async def on_message(message):
-    if message.author == client.user:  # Check if the message is from the bot itself
+    print("Received message: {} in {}".format(message.content, message.channel.id))
+    if message.author == client.user:
         return
-
-    # Check if the bot is mentioned by name or if the message is a Direct Message
+    # Ignore slash command invocations as messages
+    if message.content.startswith('/'):
+        return
     if client.user in message.mentions or isinstance(message.channel, discord.DMChannel):
         await handle_bot_mention(message)
     else:
-        # If not mentioned by name and not a DM, you can choose to handle other logic here
         await client.process_commands(message)
 
-# Function to handle AI responses when bot's role is mentioned
 async def handle_bot_mention(message):
-    if isinstance(message.channel, discord.DMChannel) or message.channel.id in target_channels:
-        print(message)
-        # Generate and send AI response using the user's message as the prompt
-        response = generate_response(message.content)
-        author_name = message.author.name.capitalize()
-        await message.channel.send(f"<To {author_name}> {response}")
+    response = generate_response(message.content)
+    await message.channel.send("{} {}".format(message.author.mention, response))
 
+def get_memories():
+    cursor.execute('SELECT id, content FROM memory ORDER BY id ASC')
+    return cursor.fetchall()
 
-# Load the allowed channel IDs when the bot starts up
-target_channels = load_allowed_channels()
-load_allowed_channels()
-# Run the bot
+def add_memory(content):
+    cursor.execute('INSERT INTO memory (content) VALUES (?)', (content,))
+    conn.commit()
+    # Enforce memory limit
+    cursor.execute('SELECT COUNT(*) FROM memory')
+    count = cursor.fetchone()[0]
+    if count > MEMORY_LIMIT:
+        cursor.execute('DELETE FROM memory WHERE id IN (SELECT id FROM memory ORDER BY id ASC LIMIT ?)', (count - MEMORY_LIMIT,))
+        conn.commit()
+
+def delete_memory(memory_id):
+    cursor.execute('DELETE FROM memory WHERE id = ?', (memory_id,))
+    conn.commit()
+
+@client.tree.command(name="remember", description="Store a short memory for the bot to use as context.")
+@app_commands.describe(text="The information to remember.")
+async def remember(interaction: discord.Interaction, text: str):
+    if not interaction.user.guild_permissions.administrator and not any(role.name == 'Bot_Admin' for role in getattr(interaction.user, 'roles', [])):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+    add_memory(text)
+    await interaction.response.send_message("Memory added! Current memory count: {}/{}".format(len(get_memories()), MEMORY_LIMIT), ephemeral=True)
+
+@client.tree.command(name="forget", description="Remove a memory from the bot's context.")
+async def forget(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator and not any(role.name == 'Bot_Admin' for role in getattr(interaction.user, 'roles', [])):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+    memories = get_memories()
+    if not memories:
+        await interaction.response.send_message("No memories to forget.", ephemeral=True)
+        return
+    memory_list = '\n'.join(["{}. {}".format(i+1, mem[1]) for i, mem in enumerate(memories)])
+    await interaction.response.send_message("Current memories:\n{}\nReply with the number to forget.".format(memory_list), ephemeral=True)
+
+    def check(m):
+        return m.author.id == interaction.user.id and m.channel.id == interaction.channel.id
+    try:
+        msg = await client.wait_for('message', check=check, timeout=60)
+        idx = int(msg.content.strip()) - 1
+        if 0 <= idx < len(memories):
+            delete_memory(memories[idx][0])
+            await interaction.followup.send("Memory {} deleted.".format(idx+1), ephemeral=True)
+        else:
+            await interaction.followup.send("Invalid number.", ephemeral=True)
+    except Exception:
+        await interaction.followup.send("No valid response received. Forget cancelled.", ephemeral=True)
+
 client.run(DISCORD_TOKEN)

@@ -32,6 +32,7 @@ applyTo: '**'
 - Always call `await client.process_commands(message)` in `on_message` unless you are intentionally blocking command processing.
 - Use `on_ready` to sync commands and print bot status.
 - Use `on_interaction` for button and component handling.
+- all interactions coming from the user in Discord via a slash command or @ mention must be filtered through the permissions to make sure the user is either an admin or has the required role to execute the command.
 
 ## Security & Permissions
 - Never expose your bot token or API keys in code or logs.

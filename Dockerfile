@@ -2,19 +2,20 @@ FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN mkdir -p /app/config
-RUN chmod -R 755 /app
 WORKDIR /app
 
-ADD bot.py .
-ADD requirements.txt .
 
-RUN apt update -y && apt install python3-pip -y
-# RUN python3 -m pip install openai python-dotenv discord
-RUN pip install -r requirements.txt
+# Copy application files
+COPY bot.py .
+COPY requirements.txt .
 
-USER root
+RUN apt update -y && apt install -y python3-pip && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir -r requirements.txt --break-system-packages
 
-RUN chmod -R 750 *                      
+# Create botuser and set ownership after copying files
+RUN addgroup --system botuser && adduser --system --ingroup botuser botuser \
+    && chown -R botuser:botuser /app
 
-ENTRYPOINT ["python3","bot.py"]
+USER botuser
+
+ENTRYPOINT ["python3", "bot.py"]

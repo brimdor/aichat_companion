@@ -33,10 +33,17 @@ client = commands.Bot(command_prefix=commands.when_mentioned_or('/'), intents=in
 
 openai.api_key = OPENAI_API_KEY
 
-if not os.path.exists('config'):
-    os.makedirs('config')
 
-conn = sqlite3.connect('config/allowed_channels.db')
+# Ensure the config directory exists before connecting to the database
+config_dir = 'config'
+db_path = os.path.join(config_dir, 'allowed_channels.db')
+if not os.path.exists(config_dir):
+    os.makedirs(config_dir, exist_ok=True)
+try:
+    conn = sqlite3.connect(db_path)
+except sqlite3.OperationalError as e:
+    logging.error("Failed to open database file at {}: {}".format(db_path, e))
+    raise
 cursor = conn.cursor()
 cursor.execute('''CREATE TABLE IF NOT EXISTS allowed_channels (channel_id INTEGER PRIMARY KEY)''')
 conn.commit()

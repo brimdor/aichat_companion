@@ -300,4 +300,17 @@ async def search(interaction: discord.Interaction, query: str):
         except Exception:
             pass
 
+@client.tree.command(name="memories", description="List the current memories used for AI context.")
+async def memories(interaction: discord.Interaction):
+    """Slash command to list all current memories used for AI context."""
+    if not interaction.user.guild_permissions.administrator and not any(role.name == BOT_ACCESS_ROLE for role in getattr(interaction.user, 'roles', [])):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+    memories = get_memories()
+    if not memories:
+        await interaction.response.send_message("No memories are currently stored.", ephemeral=True)
+        return
+    memory_list = "\n".join(["{}. {}".format(i+1, mem[1]) for i, mem in enumerate(memories)])
+    await interaction.response.send_message("Current memories used for AI context:\n{}".format(memory_list), ephemeral=True)
+
 client.run(DISCORD_TOKEN)

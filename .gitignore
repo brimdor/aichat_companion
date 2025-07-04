@@ -2,3 +2,4 @@
 .env
 allowed_channels.txt
 venv
+config

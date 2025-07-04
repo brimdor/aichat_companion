@@ -11,6 +11,7 @@ applyTo: '**'
 - Add docstrings to all public functions and classes.
 - Use async/await for all Discord event handlers and commands.
 - Handle exceptions gracefully and log errors for debugging.
+- Always use .format instead of f-strings for dynamic strings in Discord messages to ensure compatibility with older Python versions.
 
 ## Discord Bot Best Practices
 - Use the latest stable `discord.py` (or maintained fork) and its `commands.Bot` and `app_commands` APIs.

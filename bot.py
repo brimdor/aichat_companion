@@ -5,6 +5,9 @@ import os
 from dotenv import load_dotenv
 import openai
 import sqlite3
+import logging
+from discord import ui
+import re
 
 if not os.getenv('DISCORD_TOKEN') and os.path.exists('.env'):
     load_dotenv(override=True)
@@ -40,6 +43,13 @@ conn.commit()
 cursor.execute('''CREATE TABLE IF NOT EXISTS memory (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT)''')
 conn.commit()
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(name)s %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger('AI_BOT')
+
 def generate_response(user_message):
     from openai import OpenAI
     openai_client = OpenAI(api_key=OPENAI_API_KEY)
@@ -64,18 +74,18 @@ def generate_response(user_message):
 
 @client.event
 async def on_ready():
-    print('Logged in as {}'.format(client.user.name))
-    print('---')
-    print('AI Model: {}'.format(AI_MODEL))
-    print('AI Search Model: {}'.format(AI_SEARCH_MODEL))
-    print('---')
-    print('Bot is ready.')
+    logger.info('Logged in as %s', client.user.name)
+    logger.info('---')
+    logger.info('AI Model: %s', AI_MODEL)
+    logger.info('AI Search Model: %s', AI_SEARCH_MODEL)
+    logger.info('---')
+    logger.info('Bot is ready.')
     try:
         await client.tree.sync()
-        print('Slash commands synced.')
-        print('Bot is ready to interact...')
+        logger.info('Slash commands synced.')
+        logger.info('Bot is ready to interact...')
     except Exception as e:
-        print('Error syncing slash commands: {}'.format(e))
+        logger.error('Error syncing slash commands: %s', e)
 
 target_channels = []
 
@@ -115,47 +125,59 @@ async def list_channels(interaction: discord.Interaction):
     channels_str = "\n".join(channel_mentions)
     await interaction.response.send_message("Allowed channels for bot interaction:\n{}".format(channels_str), ephemeral=True)
 
+def is_allowed_channel(message):
+    if not message.guild:
+        return False
+    return message.channel.id in target_channels
+
 @client.event
 async def on_message(message):
     if message.guild:
         server_name = message.guild.name
         channel_name = message.channel.name if hasattr(message.channel, 'name') else str(message.channel)
-        location = "{}:{}".format(server_name, channel_name)
+        location = f"{server_name}:{channel_name}"
     else:
         user_name = message.author.name if hasattr(message.author, 'name') else str(message.author)
-        location = "DM:Direct Message with {}".format(user_name)
-    print("Received message: {} in {}".format(message.content, location))
+        location = f"DM:Direct Message with {user_name}"
+    logger.debug("Received message: '%s' in %s (author: %s, id: %s)", message.content, location, message.author, message.author.id)
     if message.author == client.user:
+        return
+    if message.type != discord.MessageType.default:
+        return
+    if not message.guild or not is_allowed_channel(message):
+        logger.warning("Message ignored: not in allowed channel or is DM.")
         return
     if message.content.startswith('/'):
         return
-    if client.user in message.mentions or isinstance(message.channel, discord.DMChannel):
+    if client.user in message.mentions:
         await handle_bot_mention(message)
     else:
-        await client.process_commands(message)
+        pass  # Do not call process_commands for slash commands
 
 async def handle_bot_mention(message):
-    if message.guild:
-        try:
-            member = message.guild.get_member(message.author.id)
-            if member is None:
-                member = await message.guild.fetch_member(message.author.id)
-        except Exception:
-            member = None
-        if not member:
-            await message.channel.send(f"Sorry {message.author.mention}, you do not have permission to interact with the bot.")
-            return
-        is_admin = getattr(member.guild_permissions, 'administrator', False)
-        has_access_role = any(role.name.strip().lower() == BOT_ACCESS_ROLE.strip().lower() for role in getattr(member, 'roles', []))
-        print(f"[DEBUG] User: {message.author} | Admin: {is_admin} | Roles: {[role.name for role in getattr(member, 'roles', [])]} | BOT_ACCESS_ROLE: {BOT_ACCESS_ROLE}")
-        if not (is_admin or has_access_role):
-            await message.channel.send(f"Sorry {message.author.mention}, you do not have permission to interact with the bot.")
-            return
-    else:
-        await message.channel.send(f"Sorry {message.author.mention}, you do not have permission to interact with the bot in DMs.")
+    if not message.guild:
+        logger.warning("Bot mention in DM ignored.")
+        return
+    try:
+        member = message.guild.get_member(message.author.id)
+        if member is None:
+            member = await message.guild.fetch_member(message.author.id)
+    except Exception:
+        member = None
+    if not member:
+        await message.channel.send("Sorry {}, you do not have permission to interact with the bot.".format(message.author.mention))
+        logger.warning("Permission denied: member not found.")
+        return
+    is_admin = getattr(member.guild_permissions, 'administrator', False)
+    has_access_role = any(role.name.strip().lower() == BOT_ACCESS_ROLE.strip().lower() for role in getattr(member, 'roles', []))
+    logger.debug("[DEBUG] User: %s | Admin: %s | Roles: %s | BOT_ACCESS_ROLE: %s", message.author, is_admin, [role.name for role in getattr(member, 'roles', [])], BOT_ACCESS_ROLE)
+    if not (is_admin or has_access_role):
+        await message.channel.send("Sorry {}, you do not have permission to interact with the bot.".format(message.author.mention))
+        logger.warning("Permission denied: user %s is not admin and lacks role %s", message.author, BOT_ACCESS_ROLE)
         return
     response = generate_response(message.content)
-    await message.channel.send(f"{message.author.mention} {response}")
+    await message.channel.send("{} {}".format(message.author.mention, response))
+    logger.debug("Responded to %s in %s", message.author, message.channel)
 
 def get_memories():
     cursor.execute('SELECT id, content FROM memory ORDER BY id ASC')
@@ -183,6 +205,34 @@ async def remember(interaction: discord.Interaction, text: str):
     add_memory(text)
     await interaction.response.send_message("Memory added! Current memory count: {}/{}".format(len(get_memories()), MEMORY_LIMIT), ephemeral=True)
 
+class ForgetMemoryView(ui.View):
+    def __init__(self, memories, timeout=60):
+        super().__init__(timeout=timeout)
+        self.memories = memories
+        self.selected_id = None
+        options = [
+            discord.SelectOption(label="{}. {}".format(i+1, mem[1]), value=str(mem[0]))
+            for i, mem in enumerate(memories)
+        ]
+        self.select = ui.Select(placeholder="Select a memory to forget...", options=options, min_values=1, max_values=1)
+        self.select.callback = self.select_callback
+        self.add_item(self.select)
+        self.forget_button = ui.Button(label="Forget", style=discord.ButtonStyle.danger)
+        self.forget_button.callback = self.forget_callback
+        self.add_item(self.forget_button)
+
+    async def select_callback(self, interaction: discord.Interaction):
+        self.selected_id = int(self.select.values[0])
+        await interaction.response.defer()  # Acknowledge the selection silently
+
+    async def forget_callback(self, interaction: discord.Interaction):
+        if self.selected_id is None:
+            await interaction.response.send_message("Please select a memory first.", ephemeral=True)
+            return
+        delete_memory(self.selected_id)
+        await interaction.response.send_message("Memory deleted.", ephemeral=True)
+        self.stop()
+
 @client.tree.command(name="forget", description="Remove a memory from the bot's context.")
 async def forget(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator and not any(role.name == BOT_ACCESS_ROLE for role in getattr(interaction.user, 'roles', [])):
@@ -192,45 +242,28 @@ async def forget(interaction: discord.Interaction):
     if not memories:
         await interaction.response.send_message("No memories to forget.", ephemeral=True)
         return
-    memory_list = '\n'.join(["{}. {}".format(i+1, mem[1]) for i, mem in enumerate(memories)])
-    await interaction.response.send_message("Current memories:\n{}\nReply with the number to forget.".format(memory_list), ephemeral=True)
-
-    def check(m):
-        return m.author.id == interaction.user.id and m.channel.id == interaction.channel.id
-    try:
-        msg = await client.wait_for('message', check=check, timeout=60)
-        idx = int(msg.content.strip()) - 1
-        if 0 <= idx < len(memories):
-            delete_memory(memories[idx][0])
-            await interaction.followup.send("Memory {} deleted.".format(idx+1), ephemeral=True)
-        else:
-            await interaction.followup.send("Invalid number.", ephemeral=True)
-    except Exception:
-        await interaction.followup.send("No valid response received. Forget cancelled.", ephemeral=True)
+    view = ForgetMemoryView(memories)
+    await interaction.response.send_message("Select a memory to forget:", view=view, ephemeral=True)
 
 @client.tree.command(name="search", description="Perform a web search and get an answer relevant to the bot's current roles, with sources.")
 @app_commands.describe(query="What do you want to search for?")
 async def search(interaction: discord.Interaction, query: str):
-    if not interaction.user.guild_permissions.administrator and not any(role.name == BOT_ACCESS_ROLE for role in getattr(interaction.user, 'roles', [])):
-        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
-        return
     try:
-        await interaction.response.defer(thinking=True, ephemeral=True)
-        deferred = True
-    except Exception:
-        deferred = False
-    try:
+        await interaction.response.defer(ephemeral=True)
         from openai import OpenAI
-        import re
         openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        memories = get_memories()
+        memory_context = '\n'.join(["Memory {}: {}".format(i+1, mem[1]) for i, mem in enumerate(memories)])
         system_prompt = (
-            "You are a helpful {0}. Your name is {1}. {2} {3} "
+            "You are a helpful {}. Your name is {}. {} {} "
             "Always perform a web search for the latest information, regardless of the question phrasing. "
             "Do not rely solely on your core knowledge. "
-            "Always consolidate your answer to fit within {4} tokens and {5} Discord message characters. "
+            "Always consolidate your answer to fit within {} tokens and {} Discord message characters. "
             "If the answer is not relevant to your current roles, respond with: 'No relevant results found for my current roles.' "
             "When providing answers from web search, always include sources (short links or URLs) for any factual claims or summaries. "
         ).format(AI_TYPE, AI_NAME, AI_ROLE1, AI_ROLE2, TOKEN_LIMIT, MAX_DISCORD_MESSAGE_LENGTH)
+        if memory_context:
+            system_prompt += " Context memories: {}".format(memory_context)
         search_input = (
             "[ALWAYS USE WEB SEARCH TOOL] Please search the web for the latest information to answer the following question, regardless of your core knowledge: {}\n\nSystem: {}"
         ).format(query, system_prompt)
@@ -253,25 +286,17 @@ async def search(interaction: discord.Interaction, query: str):
             max_content_len = MAX_DISCORD_MESSAGE_LENGTH - len(sources_list) - 8
             if len(content) > max_content_len:
                 content = content[:max_content_len - 3] + '...'
-            answer = f"{content}\n---\nSources:\n{sources_list}"
+            answer = "{}\n---\nSources:\n{}".format(content, sources_list)
         else:
             if len(answer) > MAX_DISCORD_MESSAGE_LENGTH:
                 answer = answer[:MAX_DISCORD_MESSAGE_LENGTH - 3] + "..."
         if len(answer) > MAX_DISCORD_MESSAGE_LENGTH:
             answer = answer[:MAX_DISCORD_MESSAGE_LENGTH - 3] + "..."
-        if deferred:
-            await interaction.followup.send(answer, ephemeral=True)
-        else:
-            await interaction.response.send_message(answer, ephemeral=True)
+        await interaction.followup.send(answer, ephemeral=True)
     except Exception as e:
-        error_msg = f"Error during web search: {e}"
-        if len(error_msg) > MAX_DISCORD_MESSAGE_LENGTH:
-            error_msg = error_msg[:MAX_DISCORD_MESSAGE_LENGTH - 3] + "..."
+        logger.error("Error in /search: %s", e)
         try:
-            if deferred:
-                await interaction.followup.send(error_msg, ephemeral=True)
-            else:
-                await interaction.response.send_message(error_msg, ephemeral=True)
+            await interaction.followup.send("An error occurred while searching.", ephemeral=True)
         except Exception:
             pass
 

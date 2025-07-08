@@ -33,8 +33,6 @@ client = commands.Bot(command_prefix=commands.when_mentioned_or('/'), intents=in
 
 openai.api_key = OPENAI_API_KEY
 
-
-# Ensure the config directory exists before connecting to the database
 config_dir = 'config'
 db_path = os.path.join(config_dir, 'allowed_channels.db')
 if not os.path.exists(config_dir):
@@ -159,7 +157,7 @@ async def on_message(message):
     if client.user in message.mentions:
         await handle_bot_mention(message)
     else:
-        pass  # Do not call process_commands for slash commands
+        pass
 
 async def handle_bot_mention(message):
     if not message.guild:
@@ -230,7 +228,7 @@ class ForgetMemoryView(ui.View):
 
     async def select_callback(self, interaction: discord.Interaction):
         self.selected_id = int(self.select.values[0])
-        await interaction.response.defer()  # Acknowledge the selection silently
+        await interaction.response.defer()
 
     async def forget_callback(self, interaction: discord.Interaction):
         if self.selected_id is None:

@@ -1,4 +1,4 @@
-# Bot: Fully Customizable ChatGPT Discord Bot
+# AI Chat Companion: Fully Customizable ChatGPT Discord Bot
 
 Bot is a powerful, fully customizable Discord bot powered by OpenAI's GPT models (GPT-3.5, GPT-4, or compatible). It is designed for seamless, context-aware conversation and advanced server management, with all AI behavior and persona controlled via environment variables. The bot is production-ready, secure, and easy to deploy using Docker.
 

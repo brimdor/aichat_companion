@@ -14,10 +14,10 @@ if not os.getenv('DISCORD_TOKEN') and os.path.exists('.env'):
 
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-AI_TYPE = os.getenv('AI_TYPE')
+AI_TYPE = os.getenv('AI_TYPE', 'assistant')
 AI_ROLE1 = os.getenv('AI_ROLE1')
 AI_ROLE2 = os.getenv('AI_ROLE2')
-AI_NAME = os.getenv('AI_NAME')
+AI_NAME = os.getenv('AI_NAME', 'Sherlock')
 MEMORY_LIMIT = int(os.getenv('MEMORY_LIMIT', 10))
 AI_MODEL = os.getenv('AI_MODEL')
 AI_SEARCH_MODEL = os.getenv('AI_SEARCH_MODEL') or AI_MODEL

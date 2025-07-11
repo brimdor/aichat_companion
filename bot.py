@@ -266,6 +266,7 @@ async def search(interaction: discord.Interaction, query: str):
             "Always consolidate your answer to fit within {} tokens and {} Discord message characters. "
             "If the answer is not relevant to your current roles, respond with: 'No relevant results found for my current roles.' "
             "When providing answers from web search, always include sources (short links or URLs) for any factual claims or summaries. "
+            "When providing generating content and responses, always make sure you are within the context memories provided."
         ).format(AI_TYPE, AI_NAME, AI_ROLE1, AI_ROLE2, TOKEN_LIMIT, MAX_DISCORD_MESSAGE_LENGTH)
         if memory_context:
             system_prompt += " Context memories: {}".format(memory_context)
